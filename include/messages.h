@@ -17,7 +17,7 @@ typedef enum {
    MSG_ABORT,            // abort - from user button or from serial port
    MSG_DONE,             // report the requested work has been done
    MSG_GET_VERSION,      // request version of the firmware
-   MSG_VERSION,          // send version of the firmware as major,minor, patch level, e.g., 1.0p1
+   MSG_VERSION,          // send version of the firmware as major,minor,patch
    MSG_STARTUP,          // init message (id, up to 9 bytes long string, cksum)
    MSG_SET_COMPUTE,      // set computation parameters
    MSG_COMPUTE,          // request computation of a batch of tasks (chunk_id, nbr_tasks)
@@ -75,7 +75,7 @@ typedef struct {
 // return the size of the message in bytes
 bool get_message_size(uint8_t msg_type, int *size);
 
-// fill the given buf by the message msg (marhaling);
+// fill the given buf by the message msg (marshaling);
 bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len);
 
 // parse the message from buf to msg (unmarshaling)

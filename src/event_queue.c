@@ -2,6 +2,7 @@
 #include <pthread.h>
 #include <stdbool.h>
 #include <stdlib.h>
+#include <errno.h>
 
 #ifndef QUEUE_CAPACITY
 #define QUEUE_CAPACITY 32
@@ -30,6 +31,36 @@ void queue_cleanup(void){
             free(ev.data.msg);
         }
     }
+}
+
+bool queue_hasdata(void) {
+    bool has_data;
+    pthread_mutex_lock(&(q.mtx));
+    has_data = (q.in != q.out);
+    pthread_mutex_unlock(&(q.mtx));
+    return has_data;
+}
+
+bool queue_wait_for_data(double timeout_s) {
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_sec += (int)timeout_s;
+    ts.tv_nsec += (timeout_s - (int)timeout_s) * 1e9;
+    if (ts.tv_nsec >= 1e9) {
+        ts.tv_sec++;
+        ts.tv_nsec -= 1e9;
+    }
+
+    pthread_mutex_lock(&q.mtx);
+    while (q.in == q.out) {
+        int ret = pthread_cond_timedwait(&q.cond, &q.mtx, &ts);
+        if (ret == ETIMEDOUT) {
+            pthread_mutex_unlock(&q.mtx);
+            return false;
+        }
+    }
+    pthread_mutex_unlock(&q.mtx);
+    return true;
 }
 
 event queue_pop(void){

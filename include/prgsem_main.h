@@ -20,6 +20,7 @@ void xwin_redraw_image();
 void update_and_redraw();
 void set_image_size(int x, int y);
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter);
+bool module_handshake();
 void local_compute();
 void send_command(cmd_type cmd);
 void process_event(event *ev);

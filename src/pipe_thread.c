@@ -24,7 +24,7 @@ void *pipe_thread(void *arg) {
     unsigned char c;
 
     // Discard garbage before the first message
-    while (io_getc_timeout(input_pipe_fd, 100, &c) > 0) {}
+    //while (io_getc_timeout(input_pipe_fd, 100, &c) > 0) {}
 
     while (!is_quit()) {
         int r = io_getc_timeout(input_pipe_fd, 100, &c);
@@ -35,7 +35,7 @@ void *pipe_thread(void *arg) {
                 if (get_message_size(c, &len)) {
                     msg_buf[i++] = c;
                 } else {
-                    error("unknown message type 0x%x", c);
+                    debug("unknown message type 0x%x", c);
                 }
             } else {
                 msg_buf[i++] = c;
@@ -48,6 +48,7 @@ void *pipe_thread(void *arg) {
                         .type = EV_MODULE,
                         .data.msg = msg
                     };
+                    //debug("pipe_thread received message");
                     event_pusher(ev);
                 } else {
                     error("cannot parse message type %d", msg_buf[0]);
@@ -71,7 +72,7 @@ void *pipe_thread(void *arg) {
         // usleep(10);
     }
 
-    debug("pipe_thread - finished");
+    debug("pipe_thread - stop");
     return NULL;
 }
 

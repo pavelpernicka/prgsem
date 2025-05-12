@@ -13,8 +13,8 @@ typedef enum {
 } event_source;
 
 typedef enum {
-   EV_COMPUTE, // request compute on nucleo with particular 
-   EV_RESET_CHUNK, //reset the chunk id
+   EV_COMPUTE,
+   EV_RESET_CHUNK,
    EV_ABORT,
    EV_GET_VERSION,
    EV_THREAD_EXIT,
@@ -48,6 +48,8 @@ typedef struct {
 void queue_init(void);
 void queue_cleanup(void);
 
+bool queue_hasdata(void);
+bool queue_wait_for_data(double timeout_s);
 event queue_pop(void);
 
 void queue_push(event ev);
@@ -57,4 +59,3 @@ bool is_quit();
 void set_quit();
 #endif
 
-/* end of event_queue.h */

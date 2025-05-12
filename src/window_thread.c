@@ -101,6 +101,17 @@ static int is_valid_sdl_key(SDL_Keycode key) {
         (key >= F1 && key <= F4);
 }
 
+void render_pixel(uint8_t iter, uint8_t *rgb) {
+    if (iter == 60) {
+        rgb[0] = rgb[1] = rgb[2] = 0;
+    } else {
+        double t = (double)iter / 60.0;
+        rgb[0] = (uint8_t)(9 * (1 - t) * t * t * t * 255);
+        rgb[1] = (uint8_t)(15 * (1 - t) * (1 - t) * t * t * 255);
+        rgb[2] = (uint8_t)(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255);
+    }
+}
+
 void *window_thread(void *arg) {
     SDL_Event event_sdl;
     debug("window_thread - start");

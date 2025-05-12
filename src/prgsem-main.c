@@ -11,6 +11,8 @@
 #include <string.h>
 #include <stdlib.h>
 #include <argp.h>
+#include <time.h>
+#include <signal.h>
 
 static pthread_t th_keyboard, th_pipe, th_sdl;
 static uint8_t *image = NULL;
@@ -32,6 +34,7 @@ static struct argp_option options[] = {
     {"n",        'n', "INT",  0, "Max iterations (default: 60)"},
     {"range-re", 1001, "MIN MAX", 0, "Real range (default: -1.6 1.6)"},
     {"range-im", 1002, "MIN MAX", 0, "Imaginary range (default: -1.1 1.1)"},
+    {"log-level", 'v', "LEVEL", 0, "Set log verbosity (0=error, 1=warn, 2=info, 3=debug)"},
     {0}
 };
 
@@ -42,6 +45,7 @@ struct arguments {
     double c_re, c_im;
     double range_re_min, range_re_max;
     double range_im_min, range_im_max;
+    int log_level;
 };
 
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
@@ -54,6 +58,12 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'r': args->c_re = atof(arg); break;
         case 'm': args->c_im = atof(arg); break;
         case 'n': args->n = atoi(arg); break;
+        case 'v':
+    		args->log_level = atoi(arg);
+    		if (args->log_level < 0 || args->log_level > 3) {
+        		argp_usage(state);
+    		}
+    break;
         case 1001:
             if (state->arg_num + 1 >= state->argc) return ARGP_ERR_UNKNOWN;
             args->range_re_min = atof(arg);
@@ -93,6 +103,7 @@ void apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
 }
 
 int main(int argc, char *argv[]) {
+	signal(SIGPIPE, SIG_IGN); // ignore pipe errors, to gracefully handle them in code
     struct arguments args = {
         .pipe_in = "/tmp/computational_module.out",
         .pipe_out = "/tmp/computational_module.in",
@@ -104,20 +115,22 @@ int main(int argc, char *argv[]) {
         .range_re_min = -1.6,
         .range_re_max = 1.6,
         .range_im_min = -1.1,
-        .range_im_max = 1.1
+        .range_im_max = 1.1,
+        .log_level = LOG_LEVEL_INFO
     };
 
     argp_parse(&argp, argc, argv, 0, 0, &args);
+    set_log_level(args.log_level);
 
-	info("Waiting for compute module...");
+	fd_in = io_open_read(args.pipe_in);
+	debug("Waiting for module to open pipe in reading mode...");
     fd_out = io_open_write(args.pipe_out);
-    fd_in = io_open_read(args.pipe_in);
     if (fd_out == -1 || fd_in == -1) {
         error("Cannot open pipes");
         return ERR_FILE_OPEN;
     }
+    debug("Pipe opened");
 
-    set_log_level(LOG_LEVEL_DEBUG);
     queue_init();
     ctx = computation_create();
     if (!ctx) {
@@ -125,38 +138,96 @@ int main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    apply_args_to_ctx(&args, ctx);
-	xwin_init(ctx->grid_w, ctx->grid_h);
     xwin_set_event_pusher(queue_push);
     keyboard_set_event_pusher(queue_push);
     pipe_set_event_pusher(queue_push);
     pipe_set_input_pipe_fd(fd_in);
 
-	set_image_size(ctx->grid_w, ctx->grid_h);
-    send_command(CMD_SET_COMPUTE);
+	pthread_create(&th_pipe, NULL, pipe_thread, NULL);
+	bool handshake_ok = module_handshake();
+	if(handshake_ok){
+    	pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
+    	pthread_create(&th_sdl, NULL, window_thread, NULL);
+    
+    	apply_args_to_ctx(&args, ctx);
+		xwin_init(ctx->grid_w, ctx->grid_h);
+		set_image_size(ctx->grid_w, ctx->grid_h);
+    	send_command(CMD_SET_COMPUTE);
+    
+    	while (!is_quit()) {
+        	event ev = queue_pop();
+        	process_event(&ev);
+    	}
 
-    pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
-    pthread_create(&th_pipe, NULL, pipe_thread, NULL);
-    pthread_create(&th_sdl, NULL, window_thread, NULL);
-
-    while (!is_quit()) {
-        event ev = queue_pop();
-        process_event(&ev);
+    	send_command(CMD_ABORT);
+    	pthread_join(th_keyboard, NULL);
+    	pthread_join(th_sdl, NULL);
+    	xwin_close();
+    }else{
+    	error("Handshake with compute module failed, exiting...");
+    	set_quit();
     }
-
-    send_command(CMD_ABORT);
-    pthread_join(th_keyboard, NULL);
     pthread_join(th_pipe, NULL);
-    pthread_join(th_sdl, NULL);
 
-    xwin_close();
     free(image);
     computation_destroy(ctx);
     io_close(fd_in);
     io_close(fd_out);
-
+	info("Gracefully exited");
     return EXIT_OK;
 }
+
+
+bool module_handshake(void) {
+    struct timespec start, now;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    double elapsed = 0;
+
+    while (!is_quit()) {
+        send_command(CMD_GET_VERSION);
+        debug("Handshake: sent command");
+
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        elapsed = (now.tv_sec - start.tv_sec) + (now.tv_nsec - start.tv_nsec) / 1e9;
+
+        if (elapsed >= 10.0) {
+            warning("Handshake timed out after 10 seconds");
+            return false;
+        }
+        
+        if (!queue_wait_for_data(0.5)) {
+            continue;
+        }
+
+            event ev = queue_pop();
+            if (ev.source == EV_MODULE && ev.data.msg->type == MSG_VERSION) {
+                message *msg = ev.data.msg;
+                msg_version local = VERSION;
+                msg_version module = msg->data.version;
+
+                if (module.major != local.major || module.minor != local.minor || module.patch != local.patch) {
+                    warning("Module has different version: %d.%d.%d, errors may occur",
+                            module.major, module.minor, module.patch);
+                } else {
+                    info("Handshake successful, module version matching: %d.%d.%d",
+                         module.major, module.minor, module.patch);
+                }
+                free(msg);
+                return true;
+            }else if(ev.source == EV_MODULE && ev.data.msg->type == MSG_STARTUP){
+            	message *msg = ev.data.msg;
+            	msg_startup startup = msg->data.startup;
+            	info("Startup message catched: %s", startup.message);
+            	free(msg);
+            	return true;
+            }else {
+                debug("Other data caught during handshake");
+            }
+    }
+
+    return false;
+}
+
 void process_event(event *ev) {
     if (ev->source == EV_KEYBOARD || ev->source == EV_SDL) {
         switch (ev->data.param) {
@@ -230,7 +301,7 @@ void process_event(event *ev) {
                 debug("Acked!");
                 break;
             case MSG_VERSION:
-                info("Module firmware ver. %d.%d-p%d",
+                info("Module version: %d.%d.%d",
                         msg->data.version.major,
                         msg->data.version.minor,
                         msg->data.version.patch);
@@ -240,7 +311,7 @@ void process_event(event *ev) {
                     debug("Received new computed data from module");
                     update_data(ctx, &msg->data.compute_data);
                 } else {
-                    warning("Received computed data from module, but not computing");
+                    debug("Received computed data from module, but not computing");
                 }
                 break;
             }
@@ -291,26 +362,23 @@ void send_command(cmd_type cmd) {
             return;
     }
 
-    if (!valid)
+    if (!valid){
+    	error("Invalid message given to send");
         return;
-
+	}
     uint8_t buf[256];
     int len = 0;
     if (fill_message_buf(&msg, buf, sizeof(buf), &len)) {
         if (write(fd_out, buf, len) != len) {
-            error("send_message() does not send all bytes of the message!");
-        }
+    if (errno == EPIPE) {
+        error("Pipe closed: cannot send to computation module (EPIPE)");
+        set_quit();
+    } else {
+        error("send_message() does not send all bytes of the message!");
     }
 }
-
-void render_pixel(uint8_t iter, uint8_t *rgb) {
-    if (iter == 60) {
-        rgb[0] = rgb[1] = rgb[2] = 0;
-    } else {
-        double t = (double)iter / 60.0;
-        rgb[0] = (uint8_t)(9 * (1 - t) * t * t * t * 255);
-        rgb[1] = (uint8_t)(15 * (1 - t) * (1 - t) * t * t * 255);
-        rgb[2] = (uint8_t)(8.5 * (1 - t) * (1 - t) * (1 - t) * t * 255);
+    }else{
+    	error("Cannot fill message buffer");
     }
 }
 
