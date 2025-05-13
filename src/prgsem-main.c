@@ -4,7 +4,7 @@
 #include "window_thread.h"
 #include "keyboard_thread.h"
 #include "pipe_thread.h"
-#include "version.h" // Will be autofilled in Makefile
+#include "version.h"
 
 #include <stdio.h>
 #include <pthread.h>
@@ -13,14 +13,6 @@
 #include <argp.h>
 #include <time.h>
 #include <signal.h>
-
-static pthread_t th_keyboard, th_pipe, th_sdl;
-static uint8_t *image = NULL;
-static bool computing_lock = false;
-static comp_ctx *ctx = NULL;
-
-static int fd_in = -1;
-static int fd_out = -1;
 
 const char *argp_program_version = APP_VERSION;
 
@@ -38,16 +30,6 @@ static struct argp_option options[] = {
     {0}
 };
 
-struct arguments {
-    const char *pipe_in;
-    const char *pipe_out;
-    int w, h, n;
-    double c_re, c_im;
-    double range_re_min, range_re_max;
-    double range_im_min, range_im_max;
-    int log_level;
-};
-
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     struct arguments *args = state->input;
     switch (key) {
@@ -59,11 +41,11 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         case 'm': args->c_im = atof(arg); break;
         case 'n': args->n = atoi(arg); break;
         case 'v':
-    		args->log_level = atoi(arg);
-    		if (args->log_level < 0 || args->log_level > 3) {
-        		argp_usage(state);
-    		}
-    break;
+            args->log_level = atoi(arg);
+            if (args->log_level < 0 || args->log_level > 3) {
+                argp_usage(state);
+            }
+            break;
         case 1001:
             if (state->arg_num + 1 >= state->argc) return ARGP_ERR_UNKNOWN;
             args->range_re_min = atof(arg);
@@ -82,15 +64,17 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
 
 static struct argp argp = {options, parse_opt, NULL, APP_DOCSTRING};
 
-void apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
+bool apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
     if (args->w <= 0 || args->h <= 0 || args->n <= 0) {
-        error("Invalid size or iteration count");
-        exit(EXIT_FAILURE);
+        error("Invalid size or iteration count: w=%d, h=%d, n=%d", args->w, args->h, args->n);
+        return false;
     }
     if (args->range_re_min >= args->range_re_max || args->range_im_min >= args->range_im_max) {
-        error("Invalid coordinate range: min must be less than max");
-        exit(EXIT_FAILURE);
+        error("Invalid coordinate range: re_min=%.3f, re_max=%.3f, im_min=%.3f, im_max=%.3f",
+              args->range_re_min, args->range_re_max, args->range_im_min, args->range_im_max);
+        return false;
     }
+
     ctx->c_re = args->c_re;
     ctx->c_im = args->c_im;
     ctx->n = args->n;
@@ -100,10 +84,13 @@ void apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
     ctx->range_re_max = args->range_re_max;
     ctx->range_im_min = args->range_im_min;
     ctx->range_im_max = args->range_im_max;
+
+    return true;
 }
 
 int main(int argc, char *argv[]) {
-	signal(SIGPIPE, SIG_IGN); // ignore pipe errors, to gracefully handle them in code
+    signal(SIGPIPE, SIG_IGN); // ignore pipe errors, to gracefully handle them in code
+
     struct arguments args = {
         .pipe_in = "/tmp/computational_module.out",
         .pipe_out = "/tmp/computational_module.in",
@@ -119,21 +106,30 @@ int main(int argc, char *argv[]) {
         .log_level = LOG_LEVEL_INFO
     };
 
+    app_state state = {
+        .image = NULL,
+        .computing_lock = false,
+        .ctx = NULL,
+        .fd_in = -1,
+        .fd_out = -1
+    };
+
+	static pthread_t th_keyboard, th_pipe, th_sdl;
     argp_parse(&argp, argc, argv, 0, 0, &args);
     set_log_level(args.log_level);
 
-	fd_in = io_open_read(args.pipe_in);
-	debug("Waiting for module to open pipe in reading mode...");
-    fd_out = io_open_write(args.pipe_out);
-    if (fd_out == -1 || fd_in == -1) {
+    state.fd_in = io_open_read(args.pipe_in);
+    info("Waiting for module to open pipe in reading mode...");
+    state.fd_out = io_open_write(args.pipe_out);
+    if (state.fd_out == -1 || state.fd_in == -1) {
         error("Cannot open pipes");
         return ERR_FILE_OPEN;
     }
     debug("Pipe opened");
 
     queue_init();
-    ctx = computation_create();
-    if (!ctx) {
+    state.ctx = computation_create();
+    if (!state.ctx) {
         error("Failed to initialize computation context");
         return EXIT_FAILURE;
     }
@@ -141,50 +137,53 @@ int main(int argc, char *argv[]) {
     xwin_set_event_pusher(queue_push);
     keyboard_set_event_pusher(queue_push);
     pipe_set_event_pusher(queue_push);
-    pipe_set_input_pipe_fd(fd_in);
+    pipe_set_input_pipe_fd(state.fd_in);
 
-	pthread_create(&th_pipe, NULL, pipe_thread, NULL);
-	bool handshake_ok = module_handshake();
-	if(handshake_ok){
-    	pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
-    	pthread_create(&th_sdl, NULL, window_thread, NULL);
-    
-    	apply_args_to_ctx(&args, ctx);
-		xwin_init(ctx->grid_w, ctx->grid_h);
-		set_image_size(ctx->grid_w, ctx->grid_h);
-    	send_command(CMD_SET_COMPUTE);
-    
-    	while (!is_quit()) {
-        	event ev = queue_pop();
-        	process_event(&ev);
-    	}
+    pthread_create(&th_pipe, NULL, pipe_thread, NULL);
+    if (module_handshake(&state)) {
+        pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
+        pthread_create(&th_sdl, NULL, window_thread, NULL);
 
-    	send_command(CMD_ABORT);
-    	pthread_join(th_keyboard, NULL);
-    	pthread_join(th_sdl, NULL);
-    	xwin_close();
-    }else{
-    	error("Handshake with compute module failed, exiting...");
-    	set_quit();
+        if (!apply_args_to_ctx(&args, state.ctx)) {
+            return EXIT_FAILURE;
+        }
+        int x = state.ctx->grid_w;
+        int y = state.ctx->grid_h;
+        
+        xwin_init(x, y);
+        set_image_size(&state, x, y);
+        send_command(&state, MSG_SET_COMPUTE);
+
+        while (!is_quit()) {
+            event ev = queue_pop();
+            process_event(&state, &ev);
+        }
+
+        send_command(&state, MSG_ABORT);
+        pthread_join(th_keyboard, NULL);
+        pthread_join(th_sdl, NULL);
+        xwin_close();
+    } else {
+        error("Handshake with compute module failed, exiting...");
+        set_quit();
     }
     pthread_join(th_pipe, NULL);
 
-    free(image);
-    computation_destroy(ctx);
-    io_close(fd_in);
-    io_close(fd_out);
-	info("Gracefully exited");
+    free(state.image);
+    computation_destroy(state.ctx);
+    io_close(state.fd_in);
+    io_close(state.fd_out);
+    info("Gracefully exited");
     return EXIT_OK;
 }
 
-
-bool module_handshake(void) {
+bool module_handshake(app_state *state) {
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
     double elapsed = 0;
 
     while (!is_quit()) {
-        send_command(CMD_GET_VERSION);
+        send_command(state, MSG_GET_VERSION);
         debug("Handshake: sent command");
 
         clock_gettime(CLOCK_MONOTONIC, &now);
@@ -194,107 +193,109 @@ bool module_handshake(void) {
             warning("Handshake timed out after 10 seconds");
             return false;
         }
-        
+
         if (!queue_wait_for_data(0.5)) {
             continue;
         }
 
-            event ev = queue_pop();
-            if (ev.source == EV_MODULE && ev.data.msg->type == MSG_VERSION) {
-                message *msg = ev.data.msg;
-                msg_version local = VERSION;
-                msg_version module = msg->data.version;
+        event ev = queue_pop();
+        if (ev.source == EV_PIPE && ev.data.msg->type == MSG_VERSION) {
+            message *msg = ev.data.msg;
+            msg_version local = VERSION;
+            msg_version module = msg->data.version;
 
-                if (module.major != local.major || module.minor != local.minor || module.patch != local.patch) {
-                    warning("Module has different version: %d.%d.%d, errors may occur",
-                            module.major, module.minor, module.patch);
-                } else {
-                    info("Handshake successful, module version matching: %d.%d.%d",
-                         module.major, module.minor, module.patch);
-                }
-                free(msg);
-                return true;
-            }else if(ev.source == EV_MODULE && ev.data.msg->type == MSG_STARTUP){
-            	message *msg = ev.data.msg;
-            	msg_startup startup = msg->data.startup;
-            	info("Startup message catched: %s", startup.message);
-            	free(msg);
-            	return true;
-            }else {
-                debug("Other data caught during handshake");
+            if (module.major != local.major || module.minor != local.minor || module.patch != local.patch) {
+                warning("Module has different version: %d.%d.%d, errors may occur",
+                        module.major, module.minor, module.patch);
+            } else {
+                info("Handshake successful, module version matching: %d.%d.%d",
+                     module.major, module.minor, module.patch);
             }
+            free(msg);
+            return true;
+        } else if (ev.source == EV_PIPE && ev.data.msg->type == MSG_STARTUP) {
+            message *msg = ev.data.msg;
+            msg_startup startup = msg->data.startup;
+            info("Startup message caught: %s", startup.message);
+            free(msg);
+            return true;
+        } else {
+            debug("Other data caught during handshake");
+        }
     }
 
     return false;
 }
 
-void process_event(event *ev) {
-    if (ev->source == EV_KEYBOARD || ev->source == EV_SDL) {
+void process_event(app_state *state, event *ev) {
+    if (ev->type == EV_QUIT) {
+        set_quit();
+    } else if (ev->source == EV_KEYBOARD || ev->source == EV_SDL) {
         switch (ev->data.param) {
-            case 'q': 
+            case 'q':
                 set_quit();
                 break;
-            case 'g': 
+            case 'g':
                 info("Get version requested");
-                send_command(CMD_GET_VERSION);
+                send_command(state, MSG_GET_VERSION);
                 break;
             case 's':
-                if (computing_lock) {
+                if (state->computing_lock) {
                     warning("New computation parameters requested but it is discarded due to ongoing computation");
                 } else {
                     info("Set new computation parameters");
-					set_image_size(1280, 960);
-					send_command(CMD_SET_COMPUTE);
+                    set_image_size(state, 1280, 960);
+                    send_command(state, MSG_SET_COMPUTE);
                 }
                 break;
             case '1':
-                if (computing_lock) {
+                if (state->computing_lock) {
                     warning("Computation already in progress");
                 } else {
-                    computing_lock = true;
+                    state->computing_lock = true;
                     info("Starting full image computation");
-                    send_command(CMD_COMPUTE);
+                    send_command(state, MSG_COMPUTE);
                 }
                 break;
             case 'a':
-                if (!computing_lock) {
+                if (!state->computing_lock) {
                     warning("Abort requested but it is not computing");
                 } else {
                     info("Abort requested");
-                    send_command(CMD_ABORT);
-                    abort_comp(ctx);
-                    computing_lock = false;
+                    send_command(state, MSG_ABORT);
+                    abort_comp(state->ctx);
+                    state->computing_lock = false;
                 }
                 break;
             case 'r':
-                if (computing_lock) {
+                if (state->computing_lock) {
                     warning("Chunk reset request discarded, it is currently computing");
                 } else {
-                    reset_cid(ctx);
+                    reset_cid(state->ctx);
                     info("Chunk reset request");
                 }
                 break;
             case 'l': {
                 int w, h;
-                get_grid_size(ctx, &w, &h);
-                memset(image, 0, w * h * 3);
-                clear_grid(ctx);
+                get_grid_size(state->ctx, &w, &h);
+                memset(state->image, 0, w * h * 3);
+                clear_grid(state->ctx);
                 info("Display buffer cleared");
-                update_and_redraw();
+                update_and_redraw(state);
                 break;
             }
             case 'p':
-                update_and_redraw();
+                update_and_redraw(state);
                 info("Image refreshed");
                 break;
             case 'c':
-                local_compute();
-                update_and_redraw();
+                local_compute(state);
+                update_and_redraw(state);
                 break;
             default:
                 warning("Unknown keyboard event received: %c", ev->data.param);
         }
-    } else if (ev->source == EV_MODULE) {
+    } else if (ev->source == EV_PIPE) {
         message *msg = ev->data.msg;
         switch (msg->type) {
             case MSG_OK:
@@ -302,14 +303,20 @@ void process_event(event *ev) {
                 break;
             case MSG_VERSION:
                 info("Module version: %d.%d.%d",
-                        msg->data.version.major,
-                        msg->data.version.minor,
-                        msg->data.version.patch);
+                     msg->data.version.major,
+                     msg->data.version.minor,
+                     msg->data.version.patch);
                 break;
+            case MSG_STARTUP: {
+                msg_startup startup = msg->data.startup;
+                info("Startup message received: %s", startup.message);
+                send_command(state, MSG_SET_COMPUTE);
+                break;
+            }
             case MSG_COMPUTE_DATA: {
-                if (computing_lock) {
+                if (state->computing_lock) {
                     debug("Received new computed data from module");
-                    update_data(ctx, &msg->data.compute_data);
+                    update_data(state->ctx, &msg->data.compute_data);
                 } else {
                     debug("Received computed data from module, but not computing");
                 }
@@ -317,18 +324,21 @@ void process_event(event *ev) {
             }
             case MSG_DONE:
                 debug("Module reports done computing chunk");
-                update_and_redraw();
-                if (is_done(ctx)) {
+                update_and_redraw(state);
+                if (is_done(state->ctx)) {
                     info("Computation ended");
-                    computing_lock = false;
+                    state->computing_lock = false;
                 } else {
                     debug("Not done yet, computing next chunk");
-                    send_command(CMD_COMPUTE);
+                    send_command(state, MSG_COMPUTE);
                 }
                 break;
             case MSG_ABORT:
                 warning("Abort from Module, stopping computing");
-                computing_lock = false;
+                state->computing_lock = false;
+                break;
+            case MSG_ERROR:
+                warning("Module reports error");
                 break;
             default:
                 warning("Unknown message type has been received 0x%x", msg->type);
@@ -338,74 +348,75 @@ void process_event(event *ev) {
     }
 }
 
-void send_command(cmd_type cmd) {
+void send_command(app_state *state, message_type cmd) {
     message msg;
     memset(&msg, 0, sizeof(msg));
 
     bool valid = false;
     switch (cmd) {
-        case CMD_GET_VERSION:
+        case MSG_GET_VERSION:
             msg.type = MSG_GET_VERSION;
             valid = true;
             break;
-        case CMD_ABORT:
+        case MSG_ABORT:
             msg.type = MSG_ABORT;
             valid = true;
             break;
-        case CMD_SET_COMPUTE:
-            valid = set_compute(ctx, &msg);
+        case MSG_SET_COMPUTE:
+            valid = set_compute(state->ctx, &msg);
             break;
-        case CMD_COMPUTE:
-            valid = compute(ctx, &msg);
+        case MSG_COMPUTE:
+            valid = compute(state->ctx, &msg);
             break;
         default:
             return;
     }
 
-    if (!valid){
-    	error("Invalid message given to send");
+    if (!valid) {
+        error("Invalid message given to send");
         return;
-	}
+    }
+
     uint8_t buf[256];
     int len = 0;
     if (fill_message_buf(&msg, buf, sizeof(buf), &len)) {
-        if (write(fd_out, buf, len) != len) {
-    if (errno == EPIPE) {
-        error("Pipe closed: cannot send to computation module (EPIPE)");
-        set_quit();
+        if (write(state->fd_out, buf, len) != len) {
+            if (errno == EPIPE) {
+                error("Pipe closed: cannot send to computation module (EPIPE)");
+                set_quit();
+            } else {
+                error("send_message() does not send all bytes of the message!");
+            }
+        }
     } else {
-        error("send_message() does not send all bytes of the message!");
-    }
-}
-    }else{
-    	error("Cannot fill message buffer");
+        error("Cannot fill message buffer");
     }
 }
 
-void update_and_redraw() {
+void update_and_redraw(app_state *state) {
     int w, h;
-    get_grid_size(ctx, &w, &h);
-    update_image(ctx, w, h, image);
-    xwin_redraw(w, h, image);
+    get_grid_size(state->ctx, &w, &h);
+    update_image(state->ctx, w, h, state->image);
+    xwin_redraw(w, h, state->image);
 }
 
-void set_image_size(int w, int h) {
-    ctx->grid_w = w;
-    ctx->grid_h = h;
-    ctx->chunk_n_re = w/CHUNK_SIZE_FACTOR;
-    ctx->chunk_n_im = h/CHUNK_SIZE_FACTOR;
-    ctx_update(ctx);
+void set_image_size(app_state *state, int w, int h) {
+    state->ctx->grid_w = w;
+    state->ctx->grid_h = h;
+    state->ctx->chunk_n_re = w / CHUNK_SIZE_FACTOR;
+    state->ctx->chunk_n_im = h / CHUNK_SIZE_FACTOR;
+    ctx_update(state->ctx);
 
-    image = realloc(image, w * h * 3);
-    if (!image) {
+    state->image = realloc(state->image, w * h * 3);
+    if (!state->image) {
         error("Failed to reallocate image buffer");
         set_quit();
         return;
     }
     xwin_resize(w, h);
-    memset(image, 0, w * h * 3);
-    clear_grid(ctx);
-    update_and_redraw();
+    memset(state->image, 0, w * h * 3);
+    clear_grid(state->ctx);
+    update_and_redraw(state);
 }
 
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter) {
@@ -419,12 +430,12 @@ uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_
     return k;
 }
 
-void local_compute() {
+void local_compute(app_state *state) {
     info("Local computation on PC started");
 
     int w, h;
-    get_grid_size(ctx, &w, &h);
-    uint8_t *grid = get_internal_grid(ctx);
+    get_grid_size(state->ctx, &w, &h);
+    uint8_t *grid = get_internal_grid(state->ctx);
 
     double c_re = -0.4, c_im = 0.6;
     double start_re = -1.6, start_im = 1.1;
@@ -442,3 +453,4 @@ void local_compute() {
     }
     info("Local computation done");
 }
+

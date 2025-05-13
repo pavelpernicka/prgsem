@@ -3,27 +3,35 @@
 
 #include <stdint.h>
 #include "event_queue.h"
+#include "computation.h"
 
 #define DEFAULT_WIDTH 640
 #define DEFAULT_HEIGHT 480
 
-typedef enum {
-    CMD_NONE,
-    CMD_QUIT,
-    CMD_GET_VERSION,
-    CMD_SET_COMPUTE,
-    CMD_COMPUTE,
-    CMD_ABORT
-} cmd_type;
+typedef struct {
+    int fd_in;
+    int fd_out;
+    comp_ctx *ctx;
+    uint8_t *image;
+    bool computing_lock;
+} app_state;
 
-void xwin_redraw_image();
-void update_and_redraw();
-void set_image_size(int x, int y);
+struct arguments {
+    const char *pipe_in;
+    const char *pipe_out;
+    int w, h, n;
+    double c_re, c_im;
+    double range_re_min, range_re_max;
+    double range_im_min, range_im_max;
+    int log_level;
+};
+
+bool module_handshake(app_state *state);
+void process_event(app_state *state, event *ev);
+void send_command(app_state *state, message_type cmd);
+void update_and_redraw(app_state *state);
+void set_image_size(app_state *state, int w, int h);
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter);
-bool module_handshake();
-void local_compute();
-void send_command(cmd_type cmd);
-void process_event(event *ev);
-void render_pixel(uint8_t iter, uint8_t *rgb);
+void local_compute(app_state *state);
 
 #endif
