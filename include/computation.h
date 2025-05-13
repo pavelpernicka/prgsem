@@ -5,7 +5,7 @@
 #ifndef __COMPUTATION_H__
 #define __COMPUTATION_H__
 
-#define CHUNK_SIZE_FACTOR 10 // Chunk size is width or heyght / this
+#define CHUNK_SIZE_FACTOR 10 // Chunk size is width or height / this
 #define APP_DOCSTRING "Fractal computation viewer"
 
 typedef struct {

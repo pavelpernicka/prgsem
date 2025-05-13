@@ -45,7 +45,7 @@ void *pipe_thread(void *arg) {
                 message *msg = safe_alloc(sizeof(message));
                 if (parse_message_buf(msg_buf, len, msg)) {
                     event ev = {
-                        .type = EV_MODULE,
+                        .type = EV_PIPE,
                         .data.msg = msg
                     };
                     //debug("pipe_thread received message");

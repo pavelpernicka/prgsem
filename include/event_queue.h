@@ -6,7 +6,7 @@
 #include <pthread.h>
 
 typedef enum {
-   EV_MODULE,
+   EV_PIPE,
    EV_KEYBOARD,
    EV_NUM,
    EV_SDL

@@ -57,7 +57,7 @@ typedef struct {
    uint8_t cid;  // chunk id
    uint8_t i_re; // x-coords 
    uint8_t i_im; // y-coords
-   uint8_t iter; // number of iterations
+   uint8_t iter; //result
 } msg_compute_data;
 
 typedef struct {
@@ -69,7 +69,7 @@ typedef struct {
       msg_compute compute;
       msg_compute_data compute_data;
    } data;
-   uint8_t cksum; // message command
+   uint8_t cksum;
 } message;
 
 // return the size of the message in bytes
