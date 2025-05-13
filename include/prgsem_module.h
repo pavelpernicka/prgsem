@@ -15,6 +15,12 @@ typedef struct {
     uint8_t max_iter;
 } module_state;
 
+struct arguments {
+    const char *pipe_in;
+    const char *pipe_out;
+    int log_level;
+};
+
 void process_event(module_state *state, event *ev);
 void send_command(module_state *state, message_type cmd);
 void send_message(module_state *state, const message *msg);

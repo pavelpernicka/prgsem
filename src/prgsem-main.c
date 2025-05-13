@@ -162,7 +162,6 @@ int main(int argc, char *argv[]) {
         send_command(&state, MSG_ABORT);
         pthread_join(th_keyboard, NULL);
         pthread_join(th_sdl, NULL);
-        xwin_close();
     } else {
         error("Handshake with compute module failed, exiting...");
         set_quit();
@@ -227,6 +226,17 @@ bool module_handshake(app_state *state) {
     return false;
 }
 
+void toggle_image_size(app_state *state) {
+    int w = state->ctx->grid_w;
+    int h = state->ctx->grid_h;
+
+    if (w == WIDTH_A && h == HEIGHT_A) {
+        set_image_size(state, WIDTH_B, HEIGHT_B);
+    } else {
+        set_image_size(state, WIDTH_A, HEIGHT_A);
+    }
+}
+
 void process_event(app_state *state, event *ev) {
     if (ev->type == EV_QUIT) {
         set_quit();
@@ -244,7 +254,7 @@ void process_event(app_state *state, event *ev) {
                     warning("New computation parameters requested but it is discarded due to ongoing computation");
                 } else {
                     info("Set new computation parameters");
-                    set_image_size(state, 1280, 960);
+                    toggle_image_size(state);
                     send_command(state, MSG_SET_COMPUTE);
                 }
                 break;

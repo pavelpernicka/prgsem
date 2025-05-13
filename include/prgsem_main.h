@@ -8,6 +8,12 @@
 #define DEFAULT_WIDTH 640
 #define DEFAULT_HEIGHT 480
 
+// Toggling between image sizes
+#define WIDTH_A 640
+#define HEIGHT_A 480
+#define WIDTH_B 1280
+#define HEIGHT_B 960
+
 typedef struct {
     int fd_in;
     int fd_out;
@@ -30,6 +36,7 @@ bool module_handshake(app_state *state);
 void process_event(app_state *state, event *ev);
 void send_command(app_state *state, message_type cmd);
 void update_and_redraw(app_state *state);
+void toggle_image_size(app_state *state);
 void set_image_size(app_state *state, int w, int h);
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter);
 void local_compute(app_state *state);

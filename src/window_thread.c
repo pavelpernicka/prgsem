@@ -6,9 +6,11 @@
 #include <SDL_image.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <pthread.h>
 
 static SDL_Window *win = NULL;
 static event_pusher_fn event_push = NULL;
+static pthread_mutex_t xwin_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 static unsigned char icon_32x32_bits[] = {
    0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x20, 0x00, 0x00, 0x23, 0x00, 0x01, 0x29, 0x00, 0x01, 0x2e, 0x00, 0x02, 0x31, 0x00, 0x02, 0x34, 0x00, 0x02, 0x35, 0x00, 0x02, 0x33, 0x00, 0x02, 0x31, 0x00, 0x01, 0x2d, 0x00, 0x01, 0x29, 0x00, 0x00, 0x23, 0x00, 0x00, 0x20, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21, 0x00, 0x00, 0x21,
@@ -49,6 +51,10 @@ int xwin_init(int w, int h)
 {
    int r;
    r = SDL_Init(SDL_INIT_VIDEO);
+   if (r != 0) {
+      fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
+      return r;
+	}
    assert(win == NULL);
    win = SDL_CreateWindow("PRG Semester Project", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, w, h, SDL_WINDOW_SHOWN);
    assert(win != NULL);
@@ -60,32 +66,50 @@ int xwin_init(int w, int h)
 }
 
 int xwin_resize(int w, int h) {
+    pthread_mutex_lock(&xwin_mutex);
     assert(win != NULL);
     SDL_SetWindowSize(win, w, h);
+    pthread_mutex_unlock(&xwin_mutex);
     return 0;
 }
 
 void xwin_close(void)
 {
-   assert(win != NULL);
-   SDL_DestroyWindow(win);
-   SDL_Quit();
+    pthread_mutex_lock(&xwin_mutex);
+    if (win) SDL_DestroyWindow(win);
+    win = NULL;
+    SDL_Quit();
+    pthread_mutex_unlock(&xwin_mutex);
 }
 
 void xwin_redraw(int w, int h, unsigned char *img)
 {
-   assert(img && win);
-   SDL_Surface *scr = SDL_GetWindowSurface(win);
-   for(int y = 0; y < scr->h; ++y) {
-      for(int x = 0; x < scr->w; ++x) {
-         const int idx = (y * scr->w + x) * scr->format->BytesPerPixel;
-         Uint8 *px = (Uint8*)scr->pixels + idx;
-         *(px + scr->format->Rshift / 8) = *(img++);
-         *(px + scr->format->Gshift / 8) = *(img++);
-         *(px + scr->format->Bshift / 8) = *(img++);
-      }
-   }
-   SDL_UpdateWindowSurface(win);
+    if (!img) return;
+
+    pthread_mutex_lock(&xwin_mutex);
+    if (!win) {
+        pthread_mutex_unlock(&xwin_mutex);
+        return;
+    }
+
+    SDL_Surface *scr = SDL_GetWindowSurface(win);
+    if (!scr) {
+        pthread_mutex_unlock(&xwin_mutex);
+        return;
+    }
+
+    for(int y = 0; y < scr->h; ++y) {
+        for(int x = 0; x < scr->w; ++x) {
+            const int idx = (y * scr->w + x) * scr->format->BytesPerPixel;
+            Uint8 *px = (Uint8*)scr->pixels + idx;
+            *(px + scr->format->Rshift / 8) = *(img++);
+            *(px + scr->format->Gshift / 8) = *(img++);
+            *(px + scr->format->Bshift / 8) = *(img++);
+        }
+    }
+
+    SDL_UpdateWindowSurface(win);
+    pthread_mutex_unlock(&xwin_mutex);
 }
 
 void xwin_set_event_pusher(event_pusher_fn handler) {

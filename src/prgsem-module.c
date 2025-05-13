@@ -27,12 +27,6 @@ static struct argp_option options[] = {
     {0}
 };
 
-struct arguments {
-    const char *pipe_in;
-    const char *pipe_out;
-    int log_level;
-};
-
 static error_t parse_opt(int key, char *arg, struct argp_state *state) {
     struct arguments *args = state->input;
     switch (key) {
