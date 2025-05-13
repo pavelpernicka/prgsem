@@ -23,4 +23,4 @@ App catches events from both window and console, so usage of both is possible.
 
 ## Implemented optional features
 - catching window events, preventing it from freezing
-
+- automatic versioning from git in Makefile, version compatibility checking
