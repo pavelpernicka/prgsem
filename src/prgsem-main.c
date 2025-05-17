@@ -89,8 +89,9 @@ bool apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
 }
 
 int main(int argc, char *argv[]) {
-    signal(SIGPIPE, SIG_IGN); // ignore pipe errors, to gracefully handle them in code
+    signal(SIGPIPE, SIG_IGN); // ignore pipe errors, handle them in code
 
+	// default argument values
     struct arguments args = {
         .pipe_in = "/tmp/computational_module.out",
         .pipe_out = "/tmp/computational_module.in",
@@ -114,7 +115,9 @@ int main(int argc, char *argv[]) {
         .fd_out = -1
     };
 
-	static pthread_t th_keyboard, th_pipe, th_sdl;
+    static pthread_t th_keyboard = 0, th_pipe = 0, th_sdl = 0;
+    bool xwin_initialized = false;
+
     argp_parse(&argp, argc, argv, 0, 0, &args);
     set_log_level(args.log_level);
 
@@ -123,15 +126,16 @@ int main(int argc, char *argv[]) {
     state.fd_out = io_open_write(args.pipe_out);
     if (state.fd_out == -1 || state.fd_in == -1) {
         error("Cannot open pipes");
-        return ERR_FILE_OPEN;
+        goto cleanup;
     }
-    debug("Pipe opened");
 
+    debug("Pipe opened");
     queue_init();
+
     state.ctx = computation_create();
     if (!state.ctx) {
         error("Failed to initialize computation context");
-        return EXIT_FAILURE;
+        goto cleanup;
     }
 
     xwin_set_event_pusher(queue_push);
@@ -139,44 +143,66 @@ int main(int argc, char *argv[]) {
     pipe_set_event_pusher(queue_push);
     pipe_set_input_pipe_fd(state.fd_in);
 
-    pthread_create(&th_pipe, NULL, pipe_thread, NULL);
-    if (module_handshake(&state)) {
-        pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
-        pthread_create(&th_sdl, NULL, window_thread, NULL);
-
-        if (apply_args_to_ctx(&args, state.ctx) == EXIT_ERROR) {
-            return EXIT_FAILURE;
-        }
-        int x = state.ctx->grid_w;
-        int y = state.ctx->grid_h;
-        
-        if(xwin_init(x, y) == EXIT_ERROR){
-        	return EXIT_FAILURE;
-        }
-        set_image_size(&state, x, y);
-        send_command(&state, MSG_SET_COMPUTE);
-        safe_show_helpscreen(&state);
-
-        while (!is_quit()) {
-            event ev = queue_pop();
-            process_event(&state, &ev);
-        }
-
-        send_command(&state, MSG_ABORT);
-        pthread_join(th_keyboard, NULL);
-        pthread_join(th_sdl, NULL);
-    } else {
-        error("Handshake with compute module failed, exiting...");
+	if (!apply_args_to_ctx(&args, state.ctx)) {
+        error("Invalid arguments");
         set_quit();
+        goto cleanup;
     }
-    pthread_join(th_pipe, NULL);
+    
+    int x = state.ctx->grid_w;
+    int y = state.ctx->grid_h;
 
+    if (xwin_init(x, y) != EXIT_OK) {
+        error("Failed to initialize SDL window");
+        set_quit();
+        goto cleanup;
+    }
+    xwin_initialized = true;
+
+    set_image_size(&state, x, y);
+
+    if (pthread_create(&th_pipe, NULL, pipe_thread, NULL) != 0) {
+        error("Failed to start pipe thread");
+        goto cleanup;
+    }
+
+    if (!module_handshake(&state)) {
+        error("Handshake with compute module failed");
+        set_quit();
+        goto cleanup;
+    }
+
+    safe_show_helpscreen(&state);
+
+    if (pthread_create(&th_keyboard, NULL, keyboard_thread, NULL) != 0 ||
+        pthread_create(&th_sdl, NULL, window_thread, NULL) != 0) {
+        error("Failed to start threads");
+        set_quit();
+        goto cleanup;
+    }
+
+    send_command(&state, MSG_SET_COMPUTE);
+
+    while (!is_quit()) {
+        event ev = queue_pop();
+        process_event(&state, &ev);
+    }
+
+    send_command(&state, MSG_ABORT);
+
+cleanup:
+    if (th_keyboard) pthread_join(th_keyboard, NULL);
+    if (th_sdl) pthread_join(th_sdl, NULL);
+    if (th_pipe) pthread_join(th_pipe, NULL);
+
+    if (xwin_initialized) xwin_close();
     free(state.image);
     computation_destroy(state.ctx);
-    io_close(state.fd_in);
-    io_close(state.fd_out);
-    info("Gracefully exited");
-    return EXIT_OK;
+    if (state.fd_in != -1) io_close(state.fd_in);
+    if (state.fd_out != -1) io_close(state.fd_out);
+
+    info("Gracefully exiting program");
+    return is_quit() ? EXIT_FAILURE : EXIT_OK;
 }
 
 #ifdef ENABLE_HANDSHAKE
@@ -242,6 +268,7 @@ void toggle_image_size(app_state *state) {
     } else {
         set_image_size(state, WIDTH_A, HEIGHT_A);
     }
+    safe_show_helpscreen(state);
 }
 
 void process_event(app_state *state, event *ev) {
@@ -360,7 +387,12 @@ void process_event(app_state *state, event *ev) {
                 break;
             }
             case MSG_DONE:
-                debug("Module reports done computing chunk");
+    			if (!state->computing_lock) {
+        			warning("MSG_DONE received, but not computing");
+        			send_command(state, MSG_ABORT);
+        			break;
+    			}
+    			debug("Module reports done computing chunk");
                 update_and_redraw(state);
                 if (is_done(state->ctx)) {
                     info("Computation ended");
@@ -447,12 +479,14 @@ void set_image_size(app_state *state, int w, int h) {
     state->ctx->chunk_n_im = h / CHUNK_SIZE_FACTOR;
     ctx_update(state->ctx);
 
-    state->image = realloc(state->image, w * h * 3);
-    if (!state->image) {
-        error("Failed to reallocate image buffer");
-        set_quit();
-        return;
-    }
+    uint8_t *new_image = realloc(state->image, w * h * 3);
+	if (!new_image) {
+    	error("Failed to reallocate image buffer");
+    	set_quit();
+    	return;
+	}
+	state->image = new_image;
+
     xwin_resize(w, h);
     memset(state->image, 0, w * h * 3);
     clear_grid(state->ctx);
@@ -462,7 +496,7 @@ void set_image_size(app_state *state, int w, int h) {
 void safe_show_helpscreen(app_state *state){
 	int w, h;
 	get_grid_size(state->ctx, &w, &h);
-    if(show_helpscreen(w, h) == EXIT_ERROR){
+    if(show_helpscreen(w, h)){
         info("Help screen showed");	
     } else {
         error("Error showing help scren, window too small");	
@@ -487,20 +521,15 @@ void local_compute(app_state *state) {
     get_grid_size(state->ctx, &w, &h);
     uint8_t *grid = get_internal_grid(state->ctx);
 
-    double c_re = -0.4, c_im = 0.6;
-    double start_re = -1.6, start_im = 1.1;
-    double d_re = 3.2 / w;
-    double d_im = -2.2 / h;
-    uint8_t max_iter = 60;
-
     for (int y = 0; y < h; ++y) {
         for (int x = 0; x < w; ++x) {
-            double z_re = start_re + x * d_re;
-            double z_im = start_im + y * d_im;
-            uint8_t iter = compute_pixel(c_re, c_im, z_re, z_im, max_iter);
-            grid[y * w + x] = iter;
+            double z_re = state->ctx->range_re_min + x * ((state->ctx->range_re_max - state->ctx->range_re_min) / w);
+            double z_im = state->ctx->range_im_max + y * ((state->ctx->range_im_min - state->ctx->range_im_max) / h);
+            grid[y * w + x] = compute_pixel(state->ctx->c_re, state->ctx->c_im, z_re, z_im, state->ctx->n);
         }
     }
+
     info("Local computation done");
 }
+
 

@@ -8,8 +8,8 @@
 #include "event_queue.h"
 
 typedef enum {
-	EXIT_OK = 0,
-	EXIT_ERROR = 1,
+	EXIT_OK = 1,
+	EXIT_ERROR = 0,
 	ERR_FILE_OPEN = 101,
 	ERR_ALLOCATION = 102,
 	ERR_ASSERTION = 105

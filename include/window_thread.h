@@ -10,7 +10,7 @@
 #define HELPSCREEN_H_MIN 100
 #define OVERLAY_MSG_MAXLEN 128
 
-#define FONT_PATH "/usr/share/fonts/truetype/tlwg/Purisa.ttf"
+#define FONT_PATH "assets/Purisa.ttf"
 #define FONT_SIZE 20
 
 typedef enum {

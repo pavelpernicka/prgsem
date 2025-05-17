@@ -280,7 +280,6 @@ void compute_chunk_and_send(module_state *state, uint8_t cid, double re0, double
             };
             send_message(state, &data_msg);
         }
-        usleep(1000);
     }
 }
 

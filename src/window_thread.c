@@ -32,7 +32,7 @@ int xwin_init(int w, int h) {
     font = TTF_OpenFont(FONT_PATH, FONT_SIZE);
     if (!font) {
         fprintf(stderr, "Failed to load font: %s\n", TTF_GetError());
-        // proceed without fonts
+        return EXIT_ERROR;
     }
 
     assert(win == NULL);
