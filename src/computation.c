@@ -110,7 +110,7 @@ bool compute(comp_ctx *ctx, message *msg) {
         }
     }
 
-    msg->type = MSG_COMPUTE;
+    //msg->type = MSG_COMPUTE;
     msg->data.compute.cid = ctx->cid;
     msg->data.compute.re = ctx->chunk_re;
     msg->data.compute.im = ctx->chunk_im;
@@ -146,6 +146,39 @@ void update_data(comp_ctx *ctx, const msg_compute_data *data) {
         }
     } else {
         error("Received chunk with unexpected chunk id (cid): %d", ctx->cid);
+    }
+}
+
+void update_data_burst(comp_ctx *ctx, uint8_t chunk_id, uint16_t length, const uint8_t *iters) {
+    assertion(iters != NULL, __func__, __LINE__, __FILE__);
+    debug("RECEIVED BURST: chunk_id=%d ctx->cid=%d len=%d", chunk_id, ctx->cid, length);
+
+    if (chunk_id != ctx->cid) {
+        error("Received burst with unexpected chunk id (cid): %d (expected %d)", chunk_id, ctx->cid);
+        return;
+    }
+
+    int w = ctx->grid_w;
+    int h = ctx->grid_h;
+    int start_x = ctx->cur_x;
+    int start_y = ctx->cur_y;
+
+    for (int i = 0; i < length; ++i) {
+        int dx = i % ctx->chunk_n_re;
+        int dy = i / ctx->chunk_n_re;
+
+        int idx_x = start_x + dx;
+        int idx_y = start_y + dy;
+
+        if (idx_x >= 0 && idx_x < w && idx_y >= 0 && idx_y < h) {
+            int idx = idx_y * w + idx_x;
+            ctx->grid[idx] = iters[i];
+        }
+    }
+
+    if ((ctx->cid + 1) >= ctx->nbr_chunks) {
+        ctx->done = true;
+        ctx->computing = false;
     }
 }
 

@@ -22,6 +22,8 @@ typedef enum {
    MSG_SET_COMPUTE,      // set computation parameters
    MSG_COMPUTE,          // request computation of a batch of tasks (chunk_id, nbr_tasks)
    MSG_COMPUTE_DATA,     // computed result (chunk_id, result)
+   MSG_COMPUTE_BURST,	// burst message request
+   MSG_COMPUTE_DATA_BURST,	// burst message reply
    MSG_NBR
 } message_type;
 
@@ -61,6 +63,12 @@ typedef struct {
 } msg_compute_data;
 
 typedef struct {
+   uint8_t chunk_id;
+   uint16_t length; // number of pixels in the data message
+   uint8_t *iters;  // pointer to the array of the compute number of iterations 
+} msg_compute_data_burst;
+
+typedef struct {
    uint8_t type;   // message type
    union {
       msg_version version;
@@ -68,6 +76,7 @@ typedef struct {
       msg_set_compute set_compute;
       msg_compute compute;
       msg_compute_data compute_data;
+      msg_compute_data_burst compute_data_burst;
    } data;
    uint8_t cksum;
 } message;
@@ -80,6 +89,10 @@ bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len);
 
 // parse the message from buf to msg (unmarshaling)
 bool parse_message_buf(const uint8_t *buf, int size, message *msg);
+
+bool fill_data_burst_buf(const msg_compute_data_burst *burst, uint8_t *buf, int size, int *len);
+
+bool parse_data_burst_buf(const uint8_t *buf, int size, msg_compute_data_burst *burst);
 
 #endif
 

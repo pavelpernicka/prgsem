@@ -7,7 +7,7 @@
 
 #include "event_queue.h"
 
-#define MESSAGE_BUFF_SIZE 256
+#define MESSAGE_BUFF_SIZE 4096
 
 typedef enum {
 	EXIT_OK = 1,

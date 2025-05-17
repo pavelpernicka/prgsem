@@ -12,41 +12,45 @@
 // - function  ----------------------------------------------------------------
 bool get_message_size(uint8_t msg_type, int *len)
 {
-   bool ret = EXIT_OK;
-   switch(msg_type) {
-      case MSG_OK:
-      case MSG_ERROR:
-      case MSG_ABORT:
-      case MSG_DONE:
-      case MSG_GET_VERSION:
-         *len = 2; // 2 bytes message - id + cksum
-         break;
-      case MSG_STARTUP:
-         *len = 2 + STARTUP_MSG_LEN;
-         break;
-      case MSG_VERSION:
-         *len = 2 + 3 * sizeof(uint8_t); // 2 + major, minor, patch
-         break;
-      case MSG_SET_COMPUTE:
-         *len = 2 + 4 * sizeof(double) + 1; // 2 + 4 * params + n 
-         break;
-      case MSG_COMPUTE:
-         *len = 2 + 1 + 2 * sizeof(double) + 2; // 2 + cid (8bit) + 2x(double - re, im) + 2 ( n_re, n_im)
-         break;
-      case MSG_COMPUTE_DATA:
-         *len = 2 + 4; // cid, dx, dy, iter
-         break;
-      default:
-         ret = EXIT_ERROR;
-         break;
-   }
-   return ret;
+    bool ret = EXIT_OK;
+    switch(msg_type) {
+        case MSG_OK:
+        case MSG_ERROR:
+        case MSG_ABORT:
+        case MSG_DONE:
+        case MSG_GET_VERSION:
+            *len = 2; // type + checksum
+            break;
+        case MSG_STARTUP:
+            *len = 2 + STARTUP_MSG_LEN;
+            break;
+        case MSG_VERSION:
+            *len = 2 + 3 * sizeof(uint8_t);
+            break;
+        case MSG_SET_COMPUTE:
+            *len = 2 + 4 * sizeof(double) + 1;
+            break;
+        case MSG_COMPUTE_BURST:
+        case MSG_COMPUTE:
+            *len = 2 + 1 + 2 * sizeof(double) + 2; // 2 + cid (8bit) + 2x(double - re, im) + 2 ( n_re, n_im)
+    		break;
+        case MSG_COMPUTE_DATA:
+            *len = 2 + 4;
+            break;
+        case MSG_COMPUTE_DATA_BURST:
+            *len = -1; // dynamic-length message
+            break;
+        default:
+            ret = EXIT_ERROR;
+            break;
+    }
+    return ret;
 }
 
 // - function  ----------------------------------------------------------------
 bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
 {
-   if (!msg || size < sizeof(message) || !buf) {
+   if (!msg || !buf) {
       return EXIT_ERROR;
    }
    // 1st - serialize the message into a buffer
@@ -80,12 +84,13 @@ bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
          buf[1 + 4 * sizeof(double)] = msg->data.set_compute.n;
          *len = 1 + 4 * sizeof(double) + 1;
          break;
-      case MSG_COMPUTE:
-         buf[1] = msg->data.compute.cid; // cid
-         memcpy(&(buf[2 + 0 * sizeof(double)]), &(msg->data.compute.re), sizeof(double));
-         memcpy(&(buf[2 + 1 * sizeof(double)]), &(msg->data.compute.im), sizeof(double));
-         buf[2 + 2 * sizeof(double) + 0] = msg->data.compute.n_re;
-         buf[2 + 2 * sizeof(double) + 1] = msg->data.compute.n_im;
+      case MSG_COMPUTE_BURST:
+	  case MSG_COMPUTE:
+         buf[1] = msg->data.compute.cid;
+         memcpy(&buf[2], &msg->data.compute.re, sizeof(double));
+         memcpy(&buf[2 + sizeof(double)], &msg->data.compute.im, sizeof(double));
+         buf[2 + 2 * sizeof(double)] = msg->data.compute.n_re;
+         buf[3 + 2 * sizeof(double)] = msg->data.compute.n_im;
          *len = 1 + 1 + 2 * sizeof(double) + 2;
          break;
       case MSG_COMPUTE_DATA:
@@ -115,60 +120,147 @@ bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
 // - function  ----------------------------------------------------------------
 bool parse_message_buf(const uint8_t *buf, int size, message *msg)
 {
-   uint8_t cksum = 0;
-   for (int i = 0; i < size; ++i) {
-      cksum += buf[i];
-   }
-   bool ret = false;
-   int message_size;
-   if (
-         size > 0 && cksum == 0xff && // sum of all bytes must be 255
-         ((msg->type = buf[0]) >= 0) && msg->type < MSG_NBR &&
-         get_message_size(msg->type, &message_size) && size == message_size) {
-      ret = true;
-      switch(msg->type) {
-         case MSG_OK:
-         case MSG_ERROR:
-         case MSG_ABORT:
-         case MSG_DONE:
-         case MSG_GET_VERSION:
+    uint8_t cksum = 0;
+    for (int i = 0; i < size; ++i) {
+        cksum += buf[i];
+    }
+
+    bool ret = false;
+    int message_size;
+
+    msg->type = buf[0];
+    if (size <= 0 || cksum != 0xFF || msg->type < 0 || msg->type >= MSG_NBR) {
+        return false;
+    }
+
+    if (!get_message_size(msg->type, &message_size)) {
+        return false;
+    }
+
+	if (message_size != -1 && size != message_size) {
+    	debug("parse_message_buf: unexpected size %d for type %d, expected %d", size, msg->type, message_size);
+    	return false;
+	}
+
+    ret = true;
+    switch (msg->type) {
+        case MSG_OK:
+        case MSG_ERROR:
+        case MSG_ABORT:
+        case MSG_DONE:
+        case MSG_GET_VERSION:
             break;
-         case MSG_STARTUP:
+
+        case MSG_STARTUP:
             for (int i = 0; i < STARTUP_MSG_LEN; ++i) {
-               msg->data.startup.message[i] = buf[i+1];
+                msg->data.startup.message[i] = buf[i + 1];
             }
             break;
-         case MSG_VERSION:
+
+        case MSG_VERSION:
             msg->data.version.major = buf[1];
             msg->data.version.minor = buf[2];
             msg->data.version.patch = buf[3];
             break;
-         case MSG_SET_COMPUTE: 
-            memcpy(&(msg->data.set_compute.c_re), &(buf[1 + 0 * sizeof(double)]), sizeof(double));
-            memcpy(&(msg->data.set_compute.c_im), &(buf[1 + 1 * sizeof(double)]), sizeof(double));
-            memcpy(&(msg->data.set_compute.d_re), &(buf[1 + 2 * sizeof(double)]), sizeof(double));
-            memcpy(&(msg->data.set_compute.d_im), &(buf[1 + 3 * sizeof(double)]), sizeof(double));
+
+        case MSG_SET_COMPUTE:
+            memcpy(&msg->data.set_compute.c_re, &buf[1 + 0 * sizeof(double)], sizeof(double));
+            memcpy(&msg->data.set_compute.c_im, &buf[1 + 1 * sizeof(double)], sizeof(double));
+            memcpy(&msg->data.set_compute.d_re, &buf[1 + 2 * sizeof(double)], sizeof(double));
+            memcpy(&msg->data.set_compute.d_im, &buf[1 + 3 * sizeof(double)], sizeof(double));
             msg->data.set_compute.n = buf[1 + 4 * sizeof(double)];
             break;
-         case MSG_COMPUTE: // type + chunk_id + nbr_tasks
+
+		case MSG_COMPUTE_BURST:
+        case MSG_COMPUTE:
             msg->data.compute.cid = buf[1];
-            memcpy(&(msg->data.compute.re), &(buf[2 + 0 * sizeof(double)]), sizeof(double));
-            memcpy(&(msg->data.compute.im), &(buf[2 + 1 * sizeof(double)]), sizeof(double));
+            memcpy(&msg->data.compute.re, &buf[2 + 0 * sizeof(double)], sizeof(double));
+            memcpy(&msg->data.compute.im, &buf[2 + 1 * sizeof(double)], sizeof(double));
             msg->data.compute.n_re = buf[2 + 2 * sizeof(double) + 0];
             msg->data.compute.n_im = buf[2 + 2 * sizeof(double) + 1];
             break;
-         case MSG_COMPUTE_DATA:  // type + chunk_id + task_id + result
+
+        case MSG_COMPUTE_DATA:
             msg->data.compute_data.cid = buf[1];
             msg->data.compute_data.i_re = buf[2];
             msg->data.compute_data.i_im = buf[3];
             msg->data.compute_data.iter = buf[4];
             break;
-         default: // unknown message type
+
+        case MSG_COMPUTE_DATA_BURST: {
+    		if (size < 5) return false;
+
+    		uint8_t cid = buf[1];
+    		uint16_t length = buf[2];
+
+    		if (length > size - 3 - 1) return false;  // data + cksum
+
+    		msg_compute_data_burst *burst = malloc(sizeof(msg_compute_data_burst));
+    		if (!burst) return false;
+
+    		burst->chunk_id = cid;
+    		burst->length = length;
+
+    		burst->iters = malloc(length);
+    		if (!burst->iters) {
+        		free(burst);
+        		return false;
+    		}
+
+    		memcpy(burst->iters, &buf[3], length);
+    		memcpy(&msg->data.compute_data_burst, burst, sizeof(msg_compute_data_burst));
+			free(burst);
+    		break;
+		}
+        default:
             ret = false;
             break;
-      } // end switch
-   }
-   return ret;
+    }
+
+    return ret;
 }
+
+
+bool fill_data_burst_buf(const msg_compute_data_burst *burst, uint8_t *buf, int size, int *len) {
+    if (!burst || !buf || size < 3 + burst->length) return EXIT_ERROR;
+
+    buf[0] = MSG_COMPUTE_DATA_BURST;
+    buf[1] = burst->chunk_id;
+    buf[2] = burst->length;
+
+    memcpy(&buf[3], burst->iters, burst->length);
+    *len = 3 + burst->length;
+
+    // Calculate checksum
+    uint8_t cksum = 0;
+    for (int i = 0; i < *len; ++i) {
+        cksum += buf[i];
+    }
+    buf[*len] = (MESSAGE_BUFF_SIZE - 1) - cksum;
+    *len += 1;
+
+    return EXIT_OK;
+}
+
+bool parse_data_burst_buf(const uint8_t *buf, int size, msg_compute_data_burst *burst) {
+    if (!buf || !burst || size < 4) return false;
+
+    uint8_t cksum = 0;
+    for (int i = 0; i < size; ++i) {
+        cksum += buf[i];
+    }
+    if (cksum != 0xFF) return false;
+
+    burst->chunk_id = buf[1];
+    burst->length = buf[2];
+    if (burst->length > size - 4) return false;
+
+    burst->iters = malloc(burst->length);
+    if (!burst->iters) return false;
+
+    memcpy(burst->iters, &buf[3], burst->length);
+    return true;
+}
+
 
 /* end of messages.c */

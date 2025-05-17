@@ -27,6 +27,7 @@ static struct argp_option options[] = {
     {"range-re", 1001, "MIN MAX", 0, "Real range (default: -1.6 1.6)"},
     {"range-im", 1002, "MIN MAX", 0, "Imaginary range (default: -1.1 1.1)"},
     {"log-level", 'v', "LEVEL", 0, "Set log verbosity (0=error, 1=warn, 2=info, 3=debug)"},
+    {"use-burst", 1003, 0, 0, "Use burst mode for receiving compute data"},
     {0}
 };
 
@@ -56,6 +57,9 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
             args->range_im_min = atof(arg);
             args->range_im_max = atof(state->argv[++state->next]);
             break;
+        case 1003:
+    		args->use_burst = true;
+    		break;
         default:
             return ARGP_ERR_UNKNOWN;
     }
@@ -104,7 +108,8 @@ int main(int argc, char *argv[]) {
         .range_re_max = 1.6,
         .range_im_min = -1.1,
         .range_im_max = 1.1,
-        .log_level = LOG_LEVEL_INFO
+        .log_level = LOG_LEVEL_INFO,
+        .use_burst = true
     };
 
     app_state state = {
@@ -112,13 +117,15 @@ int main(int argc, char *argv[]) {
         .computing_lock = false,
         .ctx = NULL,
         .fd_in = -1,
-        .fd_out = -1
+        .fd_out = -1,
+        .use_burst = true
     };
 
     static pthread_t th_keyboard = 0, th_pipe = 0, th_sdl = 0;
     bool xwin_initialized = false;
 
     argp_parse(&argp, argc, argv, 0, 0, &args);
+    state.use_burst = args.use_burst;
     set_log_level(args.log_level);
 
     state.fd_in = io_open_read(args.pipe_in);
@@ -390,6 +397,16 @@ void process_event(app_state *state, event *ev) {
                 }
                 break;
             }
+            case MSG_COMPUTE_DATA_BURST: {
+    			msg_compute_data_burst *burst = (msg_compute_data_burst *)&msg->data;
+    			if (state->computing_lock) {
+        			debug("Received burst of computed data from module");
+        			update_data_burst(state->ctx, burst->chunk_id, burst->length, burst->iters);
+    			} else {
+        			debug("Received burst but computation not in progress");
+    			}
+    			break;
+			}
             case MSG_DONE:
     			if (!state->computing_lock) {
         			warning("MSG_DONE received, but not computing");
@@ -444,9 +461,13 @@ void send_command(app_state *state, message_type cmd) {
         case MSG_SET_COMPUTE:
             valid = set_compute(state->ctx, &msg);
             break;
-        case MSG_COMPUTE:
-            valid = compute(state->ctx, &msg);
-            break;
+        case MSG_COMPUTE: {
+    		msg.type = MSG_COMPUTE_BURST;
+    		info("sending burst compute");
+    		valid = compute(state->ctx, &msg);
+    		//info("Validity check says: %d", valid);
+    		break;
+		}
         default:
             return;
     }

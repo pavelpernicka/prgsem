@@ -234,6 +234,24 @@ void process_event(module_state *state, event *ev) {
                     msg->data.compute.n_im);
                 send_command(state, MSG_DONE);
                 break;
+            case MSG_COMPUTE_BURST: {
+    			info("MSG_COMPUTE_BURST received");
+    			if (msg->data.compute.n_re <= 0 || msg->data.compute.n_im <= 0) {
+        			warning("Invalid compute region size: n_re = %d, n_im = %d",
+                	msg->data.compute.n_re, msg->data.compute.n_im);
+        			send_command(state, MSG_ERROR);
+        			break;
+    			}
+    			compute_chunk_burst_and_send(state,
+        		msg->data.compute.cid,
+        		msg->data.compute.re,
+        		msg->data.compute.im,
+        		msg->data.compute.n_re,
+        		msg->data.compute.n_im);
+
+    			send_command(state, MSG_DONE);
+    			break;
+			}
             default:
                 warning("Unknown message type received: 0x%x", msg->type);
                 send_command(state, MSG_ERROR);
@@ -281,5 +299,51 @@ void compute_chunk_and_send(module_state *state, uint8_t cid, double re0, double
             send_message(state, &data_msg);
         }
     }
+}
+
+void compute_chunk_burst_and_send(module_state *state, uint8_t cid, double re0, double im0, uint8_t n_re, uint8_t n_im) {
+    uint16_t count = n_re * n_im;
+
+    // Dynamically allocate enough room
+    uint8_t *iters = malloc(count);
+    if (!iters) {
+        error("Allocation failed for compute burst");
+        return;
+    }
+
+    for (uint8_t y = 0; y < n_im; ++y) {
+        for (uint8_t x = 0; x < n_re; ++x) {
+            double z_re = re0 + x * state->d_re;
+            double z_im = im0 + y * state->d_im;
+            uint8_t iter = compute_pixel(state->c_re, state->c_im, z_re, z_im, state->max_iter);
+            iters[y * n_re + x] = iter;
+        }
+    }
+
+    // Create a message and embed burst info
+    message msg;
+    memset(&msg, 0, sizeof(msg));
+    msg.type = MSG_COMPUTE_DATA_BURST;
+    msg.data.compute_data_burst.chunk_id = cid;
+    msg.data.compute_data_burst.length = count;
+    msg.data.compute_data_burst.iters = iters;
+
+    // Dynamically allocate buffer with required size
+    int buf_size = 3 + count + 1; // type + cid + len + data + cksum
+    uint8_t *buf = malloc(buf_size);
+    int len = 0;
+
+    if (fill_data_burst_buf(&msg.data.compute_data_burst, buf, buf_size, &len)) {
+        if (write(state->fd_out, buf, len) != len) {
+            error("Failed to send burst message");
+        } else {
+            debug("Sent MSG_COMPUTE_DATA_BURST: cid=%d, %d bytes", cid, count);
+        }
+    } else {
+        error("Failed to fill burst message buffer");
+    }
+
+    free(buf);
+    free(iters);
 }
 

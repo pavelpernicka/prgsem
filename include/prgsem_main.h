@@ -24,6 +24,7 @@ typedef struct {
     comp_ctx *ctx;
     uint8_t *image;
     bool computing_lock;
+    bool use_burst;
 } app_state;
 
 struct arguments {
@@ -34,6 +35,7 @@ struct arguments {
     double range_re_min, range_re_max;
     double range_im_min, range_im_max;
     int log_level;
+    bool use_burst;
 };
 
 bool module_handshake(app_state *state);

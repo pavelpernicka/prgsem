@@ -55,6 +55,7 @@ bool set_compute(comp_ctx *ctx, message *msg);
 bool compute(comp_ctx *ctx, message *msg);
 void update_image(comp_ctx *ctx, int w, int h, unsigned char *img);
 void update_data(comp_ctx *ctx, const msg_compute_data *data);
+void update_data_burst(comp_ctx *ctx, uint8_t chunk_id, uint16_t length, const uint8_t *iters);
 void clear_grid(comp_ctx *ctx);
 int get_current_cid(comp_ctx *ctx);
 void reset_cid(comp_ctx *ctx);
