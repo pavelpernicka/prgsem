@@ -150,7 +150,8 @@ bool show_helpscreen(int w, int h) {
         "s - switching between resolutions",
         "l - clear buffer",
         "p - redraw window",
-        "c - compute locally"
+        "c - compute locally",
+        "h - show this help"
     };
 
     SDL_Color textColor = {0, 0, 0};

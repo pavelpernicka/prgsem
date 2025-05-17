@@ -41,7 +41,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         default:
             return ARGP_ERR_UNKNOWN;
     }
-    return 0;
+    return EXIT_ERROR;
 }
 
 static struct argp argp = {options, parse_opt, NULL, MOD_DOCSTRING};
@@ -167,7 +167,7 @@ void send_command(module_state *state, message_type cmd) {
 }
 
 void send_message(module_state *state, const message *msg) {
-    uint8_t buf[256];
+    uint8_t buf[MESSAGE_BUFF_SIZE];
     int len = 0;
     if (fill_message_buf(msg, buf, sizeof(buf), &len)) {
         if (write(state->fd_out, buf, len) != len) {

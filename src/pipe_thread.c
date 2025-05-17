@@ -19,7 +19,7 @@ void pipe_set_input_pipe_fd(int fd) {
 void *pipe_thread(void *arg) {
     debug("pipe_thread - start");
 
-    uint8_t msg_buf[256];
+    uint8_t msg_buf[MESSAGE_BUFF_SIZE];
     int i = 0, len = 0;
     unsigned char c;
 

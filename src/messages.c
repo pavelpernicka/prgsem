@@ -7,11 +7,12 @@
 #include <string.h>
 
 #include "messages.h"
+#include "common.h"
 
 // - function  ----------------------------------------------------------------
 bool get_message_size(uint8_t msg_type, int *len)
 {
-   bool ret = true;
+   bool ret = EXIT_OK;
    switch(msg_type) {
       case MSG_OK:
       case MSG_ERROR:
@@ -36,7 +37,7 @@ bool get_message_size(uint8_t msg_type, int *len)
          *len = 2 + 4; // cid, dx, dy, iter
          break;
       default:
-         ret = false;
+         ret = EXIT_ERROR;
          break;
    }
    return ret;
@@ -46,10 +47,10 @@ bool get_message_size(uint8_t msg_type, int *len)
 bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
 {
    if (!msg || size < sizeof(message) || !buf) {
-      return false;
+      return EXIT_ERROR;
    }
    // 1st - serialize the message into a buffer
-   bool ret = true;
+   bool ret = EXIT_OK;
    *len = 0;
    switch(msg->type) {
       case MSG_OK:
@@ -95,7 +96,7 @@ bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
          *len = 5;
          break;
       default: // unknown message type
-         ret = false;
+         ret = EXIT_ERROR;
          break;
    }
    // 2nd - send the message buffer
@@ -105,7 +106,7 @@ bool fill_message_buf(const message *msg, uint8_t *buf, int size, int *len)
       for (int i = 0; i < *len; ++i) {
          buf[*len] += buf[i];
       }
-      buf[*len] = 255 - buf[*len]; // compute cksum
+      buf[*len] = (MESSAGE_BUFF_SIZE-1) - buf[*len]; // compute cksum
       *len += 1; // add cksum to buffer
    }
    return ret;

@@ -59,7 +59,7 @@ static error_t parse_opt(int key, char *arg, struct argp_state *state) {
         default:
             return ARGP_ERR_UNKNOWN;
     }
-    return 0;
+    return EXIT_OK;
 }
 
 static struct argp argp = {options, parse_opt, NULL, APP_DOCSTRING};
@@ -220,7 +220,7 @@ bool module_handshake(app_state *state) {
 
         if (elapsed >= 10.0) {
             warning("Handshake timed out after 10 seconds");
-            return false;
+            return EXIT_ERROR;
         }
 
         if (!queue_wait_for_data(0.5)) {
@@ -241,22 +241,22 @@ bool module_handshake(app_state *state) {
                      module.major, module.minor, module.patch);
             }
             free(msg);
-            return true;
+            return EXIT_OK;
         } else if (ev.source == EV_PIPE && ev.data.msg->type == MSG_STARTUP) {
             message *msg = ev.data.msg;
             msg_startup startup = msg->data.startup;
             info("Startup message caught: %s", startup.message);
             free(msg);
-            return true;
+            return EXIT_OK;
         } else {
             debug("Other data caught during handshake");
         }
     }
 
-    return false;
+    return EXIT_ERROR;
 }
 #else
-bool module_handshake(app_state *state) { return true; }
+bool module_handshake(app_state *state) { return EXIT_OK; }
 #endif // ENABLE_HANDSHAKE
 
 void toggle_image_size(app_state *state) {
@@ -287,9 +287,9 @@ void process_event(app_state *state, event *ev) {
                 if (state->computing_lock) {
                     warning("New computation parameters requested but it is discarded due to ongoing computation");
                     xwin_set_overlay_message("Cannot set parameters - computing!");
+                    update_and_redraw(state);
                 } else {
                     info("Set new computation parameters");
-                    xwin_set_overlay_message("Set new computation parameters");
                     xwin_set_overlay_message("Set new params");
                     toggle_image_size(state);
                     send_command(state, MSG_SET_COMPUTE);
@@ -311,7 +311,8 @@ void process_event(app_state *state, event *ev) {
                     warning("Abort requested but it is not computing");
                 } else {
                     info("Abort requested");
-                    xwin_set_overlay_message("Aborting...");
+                    xwin_set_overlay_message("Aborted");
+                    update_and_redraw(state);
                     send_command(state, MSG_ABORT);
                     abort_comp(state->ctx);
                     state->computing_lock = false;
@@ -325,6 +326,7 @@ void process_event(app_state *state, event *ev) {
                     reset_cid(state->ctx);
                     info("Chunk reset request");
                     xwin_set_overlay_message("CID reseted.");
+                    update_and_redraw(state);
                 }
                 break;
             case 'l': {
@@ -332,14 +334,15 @@ void process_event(app_state *state, event *ev) {
                 get_grid_size(state->ctx, &w, &h);
                 memset(state->image, 0, w * h * 3);
                 clear_grid(state->ctx);
+                xwin_set_overlay_message("Cleared");
                 info("Display buffer cleared");
                 update_and_redraw(state);
                 break;
             }
             case 'p':
+                xwin_set_overlay_message("Redrawed");
                 update_and_redraw(state);
                 info("Image refreshed");
-                xwin_set_overlay_message("Redrawed.");
                 break;
             case 'c':
                 local_compute(state);
@@ -370,6 +373,7 @@ void process_event(app_state *state, event *ev) {
                      msg->data.version.major,
                      msg->data.version.minor,
                      msg->data.version.patch);
+                update_and_redraw(state);
                 break;
             case MSG_STARTUP: {
                 msg_startup startup = msg->data.startup;
@@ -397,6 +401,7 @@ void process_event(app_state *state, event *ev) {
                 if (is_done(state->ctx)) {
                     info("Computation ended");
                     xwin_set_overlay_message("Computation ended.");
+                    update_and_redraw(state);
                     state->computing_lock = false;
                 } else {
                     debug("Not done yet, computing next chunk");
@@ -406,11 +411,13 @@ void process_event(app_state *state, event *ev) {
             case MSG_ABORT:
                 warning("Abort from Module, stopping computing");
                 xwin_set_overlay_message("Abort from module, stopping.");
+                update_and_redraw(state);
                 state->computing_lock = false;
                 break;
             case MSG_ERROR:
                 warning("Module reports error");
                 xwin_set_overlay_message("Error from module.");
+                update_and_redraw(state);
                 break;
             default:
                 warning("Unknown message type has been received 0x%x", msg->type);
@@ -449,7 +456,7 @@ void send_command(app_state *state, message_type cmd) {
         return;
     }
 
-    uint8_t buf[256];
+    uint8_t buf[MESSAGE_BUFF_SIZE];
     int len = 0;
     if (fill_message_buf(&msg, buf, sizeof(buf), &len)) {
         if (write(state->fd_out, buf, len) != len) {
@@ -468,7 +475,7 @@ void send_command(app_state *state, message_type cmd) {
 void update_and_redraw(app_state *state) {
     int w, h;
     get_grid_size(state->ctx, &w, &h);
-    update_image(state->ctx, w, h, state->image);
+	update_image(state->ctx, w, h, state->image);
     xwin_redraw(w, h, state->image);
 }
 
@@ -516,7 +523,7 @@ uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_
 
 void local_compute(app_state *state) {
     info("Local computation on PC started");
-
+	xwin_set_overlay_message("Locally computed");
     int w, h;
     get_grid_size(state->ctx, &w, &h);
     uint8_t *grid = get_internal_grid(state->ctx);
@@ -531,5 +538,4 @@ void local_compute(app_state *state) {
 
     info("Local computation done");
 }
-
 

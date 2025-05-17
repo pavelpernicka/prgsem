@@ -20,6 +20,7 @@ App catches events from both window and console, so usage of both is possible.
 - ```l``` - clear buffer
 - ```p``` - redraw window
 - ```c``` - compute locally
+- ```h``` - show help screen
 
 ## Implemented optional features
 - catching window events, preventing it from freezing
