@@ -21,18 +21,18 @@ int xwin_init(int w, int h) {
     int r = SDL_Init(SDL_INIT_VIDEO);
     if (r != 0) {
         fprintf(stderr, "SDL_Init failed: %s\n", SDL_GetError());
-        return r;
+        return EXIT_ERROR;
     }
 
     if (TTF_Init() == -1) {
         fprintf(stderr, "TTF_Init failed: %s\n", TTF_GetError());
-        return -1;
+        return EXIT_ERROR;
     }
 
     font = TTF_OpenFont(FONT_PATH, FONT_SIZE);
     if (!font) {
         fprintf(stderr, "Failed to load font: %s\n", TTF_GetError());
-        return -1;
+        // proceed without fonts
     }
 
     assert(win == NULL);
@@ -43,7 +43,7 @@ int xwin_init(int w, int h) {
     SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(icon_32x32_bits, 32, 32, 24, 32 * 3, 0xff, 0xff00, 0xff0000, 0x0000);
     SDL_SetWindowIcon(win, surface);
     SDL_FreeSurface(surface);
-    return 0;
+    return EXIT_OK;
 }
 
 int xwin_resize(int w, int h) {
@@ -122,19 +122,19 @@ void render_pixel(uint8_t iter, uint8_t *rgb) {
 
 bool show_helpscreen(int w, int h) {
     if (w < HELPSCREEN_W_MIN || h < HELPSCREEN_H_MIN || !font) {
-        return false;
+        return EXIT_ERROR;
     }
 
     pthread_mutex_lock(&xwin_mutex);
     if (!win) {
         pthread_mutex_unlock(&xwin_mutex);
-        return false;
+        return EXIT_ERROR;
     }
 
     SDL_Surface *surf = SDL_GetWindowSurface(win);
     if (!surf) {
         pthread_mutex_unlock(&xwin_mutex);
-        return false;
+        return EXIT_ERROR;
     }
 
     SDL_FillRect(surf, NULL, SDL_MapRGB(surf->format, 255, 255, 255));
@@ -173,7 +173,7 @@ bool show_helpscreen(int w, int h) {
 
     SDL_UpdateWindowSurface(win);
     pthread_mutex_unlock(&xwin_mutex);
-    return true;
+    return EXIT_OK;
 }
 
 void xwin_draw_overlay_message(SDL_Surface *surf) {

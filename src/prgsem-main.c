@@ -67,12 +67,12 @@ static struct argp argp = {options, parse_opt, NULL, APP_DOCSTRING};
 bool apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
     if (args->w <= 0 || args->h <= 0 || args->n <= 0) {
         error("Invalid size or iteration count: w=%d, h=%d, n=%d", args->w, args->h, args->n);
-        return false;
+        return EXIT_ERROR;
     }
     if (args->range_re_min >= args->range_re_max || args->range_im_min >= args->range_im_max) {
         error("Invalid coordinate range: re_min=%.3f, re_max=%.3f, im_min=%.3f, im_max=%.3f",
               args->range_re_min, args->range_re_max, args->range_im_min, args->range_im_max);
-        return false;
+        return EXIT_ERROR;
     }
 
     ctx->c_re = args->c_re;
@@ -85,7 +85,7 @@ bool apply_args_to_ctx(struct arguments *args, comp_ctx *ctx) {
     ctx->range_im_min = args->range_im_min;
     ctx->range_im_max = args->range_im_max;
 
-    return true;
+    return EXIT_OK;
 }
 
 int main(int argc, char *argv[]) {
@@ -144,13 +144,15 @@ int main(int argc, char *argv[]) {
         pthread_create(&th_keyboard, NULL, keyboard_thread, NULL);
         pthread_create(&th_sdl, NULL, window_thread, NULL);
 
-        if (!apply_args_to_ctx(&args, state.ctx)) {
+        if (apply_args_to_ctx(&args, state.ctx) == EXIT_ERROR) {
             return EXIT_FAILURE;
         }
         int x = state.ctx->grid_w;
         int y = state.ctx->grid_h;
         
-        xwin_init(x, y);
+        if(xwin_init(x, y) == EXIT_ERROR){
+        	return EXIT_FAILURE;
+        }
         set_image_size(&state, x, y);
         send_command(&state, MSG_SET_COMPUTE);
         safe_show_helpscreen(&state);
@@ -460,7 +462,7 @@ void set_image_size(app_state *state, int w, int h) {
 void safe_show_helpscreen(app_state *state){
 	int w, h;
 	get_grid_size(state->ctx, &w, &h);
-    if(show_helpscreen(w, h)){
+    if(show_helpscreen(w, h) == EXIT_ERROR){
         info("Help screen showed");	
     } else {
         error("Error showing help scren, window too small");	
