@@ -4,7 +4,7 @@ LDFLAGS = -pthread
 
 # SDL2
 CFLAGS += $(shell sdl2-config --cflags)
-LDFLAGS += $(shell sdl2-config --libs) -lSDL2_image
+LDFLAGS += $(shell sdl2-config --libs) -lSDL2_image -lSDL2_ttf
 
 SRC_DIR := src
 INC_DIR := include

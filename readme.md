@@ -3,7 +3,7 @@ SDL applicalion and compute module for computing and displaying fractals. Semina
 
 ## Build
 - Install prerequirements:
-```sudo apt update && sudo apt install -y build-essential gcc make git libsdl2-dev libsdl2-image-dev libpthread-stubs0-dev pkg-config git```
+```sudo apt update && sudo apt install -y build-essential gcc make git libsdl2-dev libsdl2-image-dev libsdl2-ttf-dev libpthread-stubs0-dev pkg-config git```
 - ```make```
 
 This will produce these binaries in build directory:

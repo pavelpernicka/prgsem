@@ -153,6 +153,7 @@ int main(int argc, char *argv[]) {
         xwin_init(x, y);
         set_image_size(&state, x, y);
         send_command(&state, MSG_SET_COMPUTE);
+        safe_show_helpscreen(&state);
 
         while (!is_quit()) {
             event ev = queue_pop();
@@ -176,6 +177,7 @@ int main(int argc, char *argv[]) {
     return EXIT_OK;
 }
 
+#ifdef ENABLE_HANDSHAKE
 bool module_handshake(app_state *state) {
     struct timespec start, now;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -225,6 +227,9 @@ bool module_handshake(app_state *state) {
 
     return false;
 }
+#else
+bool module_handshake(app_state *state) { return true; }
+#endif // ENABLE_HANDSHAKE
 
 void toggle_image_size(app_state *state) {
     int w = state->ctx->grid_w;
@@ -252,8 +257,11 @@ void process_event(app_state *state, event *ev) {
             case 's':
                 if (state->computing_lock) {
                     warning("New computation parameters requested but it is discarded due to ongoing computation");
+                    xwin_set_overlay_message("Cannot set parameters - computing!");
                 } else {
                     info("Set new computation parameters");
+                    xwin_set_overlay_message("Set new computation parameters");
+                    xwin_set_overlay_message("Set new params");
                     toggle_image_size(state);
                     send_command(state, MSG_SET_COMPUTE);
                 }
@@ -261,9 +269,11 @@ void process_event(app_state *state, event *ev) {
             case '1':
                 if (state->computing_lock) {
                     warning("Computation already in progress");
+                    xwin_set_overlay_message("Still computing!");
                 } else {
                     state->computing_lock = true;
                     info("Starting full image computation");
+                    xwin_set_overlay_message("Computation started");
                     send_command(state, MSG_COMPUTE);
                 }
                 break;
@@ -272,6 +282,7 @@ void process_event(app_state *state, event *ev) {
                     warning("Abort requested but it is not computing");
                 } else {
                     info("Abort requested");
+                    xwin_set_overlay_message("Aborting...");
                     send_command(state, MSG_ABORT);
                     abort_comp(state->ctx);
                     state->computing_lock = false;
@@ -280,9 +291,11 @@ void process_event(app_state *state, event *ev) {
             case 'r':
                 if (state->computing_lock) {
                     warning("Chunk reset request discarded, it is currently computing");
+                    xwin_set_overlay_message("Still computing, chnk reset discarded.");
                 } else {
                     reset_cid(state->ctx);
                     info("Chunk reset request");
+                    xwin_set_overlay_message("CID reseted.");
                 }
                 break;
             case 'l': {
@@ -297,11 +310,19 @@ void process_event(app_state *state, event *ev) {
             case 'p':
                 update_and_redraw(state);
                 info("Image refreshed");
+                xwin_set_overlay_message("Redrawed.");
                 break;
             case 'c':
                 local_compute(state);
                 update_and_redraw(state);
                 break;
+            case 'h': {
+            	if (state->computing_lock) {
+            		return;
+            	}
+            	safe_show_helpscreen(state);
+            	break;
+            }
             default:
                 warning("Unknown keyboard event received: %c", ev->data.param);
         }
@@ -313,6 +334,10 @@ void process_event(app_state *state, event *ev) {
                 break;
             case MSG_VERSION:
                 info("Module version: %d.%d.%d",
+                     msg->data.version.major,
+                     msg->data.version.minor,
+                     msg->data.version.patch);
+            	xwin_set_overlay_message("Got version: %d.%d.%d",
                      msg->data.version.major,
                      msg->data.version.minor,
                      msg->data.version.patch);
@@ -337,6 +362,7 @@ void process_event(app_state *state, event *ev) {
                 update_and_redraw(state);
                 if (is_done(state->ctx)) {
                     info("Computation ended");
+                    xwin_set_overlay_message("Computation ended.");
                     state->computing_lock = false;
                 } else {
                     debug("Not done yet, computing next chunk");
@@ -345,10 +371,12 @@ void process_event(app_state *state, event *ev) {
                 break;
             case MSG_ABORT:
                 warning("Abort from Module, stopping computing");
+                xwin_set_overlay_message("Abort from module, stopping.");
                 state->computing_lock = false;
                 break;
             case MSG_ERROR:
                 warning("Module reports error");
+                xwin_set_overlay_message("Error from module.");
                 break;
             default:
                 warning("Unknown message type has been received 0x%x", msg->type);
@@ -427,6 +455,16 @@ void set_image_size(app_state *state, int w, int h) {
     memset(state->image, 0, w * h * 3);
     clear_grid(state->ctx);
     update_and_redraw(state);
+}
+
+void safe_show_helpscreen(app_state *state){
+	int w, h;
+	get_grid_size(state->ctx, &w, &h);
+    if(show_helpscreen(w, h)){
+        info("Help screen showed");	
+    } else {
+        error("Error showing help scren, window too small");	
+    }
 }
 
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter) {

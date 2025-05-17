@@ -5,6 +5,10 @@
 #include "event_queue.h"
 #include "computation.h"
 
+// Functionality configurators
+//#define ENABLE_HANDSHAKE
+
+// Initial values
 #define DEFAULT_WIDTH 640
 #define DEFAULT_HEIGHT 480
 
@@ -38,6 +42,7 @@ void send_command(app_state *state, message_type cmd);
 void update_and_redraw(app_state *state);
 void toggle_image_size(app_state *state);
 void set_image_size(app_state *state, int w, int h);
+void safe_show_helpscreen(app_state *state);
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter);
 void local_compute(app_state *state);
 
