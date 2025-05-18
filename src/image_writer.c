@@ -1,5 +1,5 @@
-#include <jpeglib.h>
 #include <png.h>
+#include <jpeglib.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>

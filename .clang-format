@@ -1,7 +1,7 @@
 ---
 AlignAfterOpenBracket: BlockIndent
 UseTab: ForIndentation
+InsertNewlineAtEOF: true
+SortIncludes: false
 AlignConsecutiveAssignments:
   Enabled: false
-InsertNewlineAtEOF: true
-
