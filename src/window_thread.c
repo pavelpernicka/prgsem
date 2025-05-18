@@ -17,6 +17,22 @@ static event_pusher_fn event_push = NULL;
 static pthread_mutex_t xwin_mutex = PTHREAD_MUTEX_INITIALIZER;
 static char overlay_message[OVERLAY_MSG_MAXLEN] = "";
 
+const char *showhelp_lines[] = {
+    "HELP SCREEN",
+    "",
+    "1 - compute using module",
+    "q - quit, a - abort",
+    "r - reset chunk id",
+    "g - get version",
+    "s - switching between resolutions",
+    "l - clear buffer, p - redraw",
+    "c - compute locally",
+    "i/o - zoom in/out",
+    "j/k - add/subtract n",
+    "arrows - move view",
+    "h - show this help"
+};
+
 int xwin_init(int w, int h) {
     int r = SDL_Init(SDL_INIT_VIDEO);
     if (r != 0) {
@@ -105,8 +121,8 @@ int is_valid_sdl_key(SDL_Keycode key) {
     return (key >= 'a' && key <= 'z') ||
            (key >= 'A' && key <= 'Z') ||
            (key >= '0' && key <= '9') ||
-           key == TAB ||
-           (key >= F1 && key <= F4);
+           key == TAB || key == F1 ||
+           (key >= RIGHT && key <= FRONT);
 }
 
 void render_pixel(uint8_t iter, uint8_t *rgb) {
@@ -139,25 +155,10 @@ bool show_helpscreen(int w, int h) {
 
     SDL_FillRect(surf, NULL, SDL_MapRGB(surf->format, 255, 255, 255));
 
-    const char *lines[] = {
-        "HELP SCREEN",
-        "",
-        "1 - compute using module",
-        "q - quit",
-        "a - abort",
-        "r - reset chunk id",
-        "g - get version",
-        "s - switching between resolutions",
-        "l - clear buffer",
-        "p - redraw window",
-        "c - compute locally",
-        "h - show this help"
-    };
-
     SDL_Color textColor = {0, 0, 0};
     int y = 30;
-    for (int i = 0; i < (int)(sizeof(lines) / sizeof(lines[0])); ++i) {
-        SDL_Surface *text = TTF_RenderUTF8_Blended(font, lines[i], textColor);
+    for (int i = 0; i < (int)(sizeof(showhelp_lines) / sizeof(showhelp_lines[0])); ++i) {
+        SDL_Surface *text = TTF_RenderUTF8_Blended(font, showhelp_lines[i], textColor);
         if (!text) continue;
 
         SDL_Rect dest = {
@@ -223,6 +224,7 @@ void *window_thread(void *arg) {
                 }
                 case SDL_KEYDOWN: {
                     SDL_Keycode key = event_sdl.key.keysym.sym;
+                    //debug("Key event: %d", key);
                     if (key == ESC) {
                         set_quit();
                         event ev = { .source = EV_SDL, .type = EV_QUIT, .data.param = 'q' };

@@ -7,6 +7,7 @@
 
 // Functionality configurators
 //#define ENABLE_HANDSHAKE
+//#define ENABLE_CLI
 
 // Initial values
 #define DEFAULT_WIDTH 640
@@ -34,16 +35,26 @@ struct arguments {
     double range_re_min, range_re_max;
     double range_im_min, range_im_max;
     int log_level;
+    bool cli_mode;
+	char *output_path;
+	int anim_fps;
+	int anim_duration;
+	double anim_zoom_factor;
 };
 
 bool module_handshake(app_state *state);
+bool apply_args_to_ctx(struct arguments *args, comp_ctx *ctx);
 void process_event(app_state *state, event *ev);
 void send_command(app_state *state, message_type cmd);
 void update_and_redraw(app_state *state);
 void toggle_image_size(app_state *state);
+void zoom_view(app_state *state, double factor);
+void move_view(app_state *state, double dx, double dy);
+void change_iterations(app_state *state, int delta);
 void set_image_size(app_state *state, int w, int h);
 void safe_show_helpscreen(app_state *state);
 uint8_t compute_pixel(double c_re, double c_im, double z_re, double z_im, uint8_t max_iter);
 void local_compute(app_state *state);
+void print_params(app_state *state);
 
 #endif

@@ -6,8 +6,8 @@
 #include "common.h"
 
 #define WINDOW_LOOP_SLEEP_INTERVAL 10
-#define HELPSCREEN_W_MIN 200
-#define HELPSCREEN_H_MIN 100
+#define HELPSCREEN_W_MIN 400
+#define HELPSCREEN_H_MIN 300
 #define OVERLAY_MSG_MAXLEN 128
 
 #define FONT_PATH "assets/Purisa.ttf"
@@ -17,11 +17,13 @@ typedef enum {
 	ESC = 27,
 	TAB = 9,
 	F1 = 1073741882,
-	F2,
-	F3,
-	F4
+	FRONT = 1073741906,
+	BACK = 1073741905,
+	LEFT = 1073741904,
+	RIGHT = 1073741903
+	
 } window_key_codes;
-
+    
 int xwin_init(int w, int h);
 int xwin_resize(int w, int h);
 void xwin_close(void);
