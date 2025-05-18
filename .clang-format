@@ -1,0 +1,7 @@
+---
+AlignAfterOpenBracket: BlockIndent
+UseTab: ForIndentation
+AlignConsecutiveAssignments:
+  Enabled: false
+InsertNewlineAtEOF: true
+

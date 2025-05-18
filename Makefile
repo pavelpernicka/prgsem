@@ -108,6 +108,9 @@ run-module: $(BUILD_DIR)/prgsem-module
 run-mkpipes:
 	./scripts/create_pipes.sh && echo "Pipes successfully created!"
 
+format:
+	find src include \( -name '*.c' -o -name '*.h' \) -exec clang-format -i {} \;
+
 clean:
 	rm -rf $(BUILD_DIR) $(VERSION_FILE)
 
